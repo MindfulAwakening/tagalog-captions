@@ -347,18 +347,15 @@
 
 <div class="setup" id="setup" style="display:none;">
   <h1>Set up</h1>
-  <div class="sub">This app translates speech on your phone, no audio is recorded or uploaded. The recognized Tagalog text is sent to Claude for translation only.</div>
+  <div class="sub">Claude listens to Tagalog speech and translates it to English — all in one step. Only your Anthropic API key is needed. Audio is never stored.</div>
 
-  <label for="openai-key">OpenAI API key — listens to Tagalog speech</label>
-  <input type="password" id="openai-key" placeholder="sk-...">
-
-  <label for="api-key">Anthropic API key — translates to English</label>
+  <label for="api-key">Anthropic API key</label>
   <input type="password" id="api-key" placeholder="sk-ant-...">
 
   <button class="save-btn" id="save-key">Save and continue</button>
 
   <div class="note">
-    Get an OpenAI key at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a> and an Anthropic key at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>. Both are stored only on this device, in your browser's local storage, and sent only directly to their respective APIs.
+    Get your key at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> → API Keys. It is stored only on this device and sent directly to Anthropic for each translation. Nothing else.
   </div>
 
   <div class="close-row">

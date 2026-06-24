@@ -1,53 +1,43 @@
 // ============================================================
-// Tagalog → English live captions (iOS-compatible version)
+// Tagalog → English live captions — Anthropic-only version
 //
-// iOS Safari's built-in speech recognition is unreliable for
-// continuous listening, so instead this app records short audio
-// chunks (MediaRecorder, well supported on iOS) and sends each
-// chunk to OpenAI Whisper for Tagalog transcription, then to
-// Claude for English translation.
-//
-// Audio chunks are sent directly to OpenAI for transcription only
-// and are not stored anywhere. Transcribed text is sent to
-// Anthropic for translation only.
+// Records 5-second audio chunks via MediaRecorder (works on iOS),
+// converts each chunk to base64, and sends it directly to Claude
+// which both transcribes the Tagalog AND returns the English
+// translation in a single API call. No OpenAI needed.
 // ============================================================
 
 const els = {
-  dot: document.getElementById('dot'),
-  statusText: document.getElementById('status-text'),
-  stage: document.getElementById('stage'),
-  placeholder: document.getElementById('placeholder'),
-  listenBtn: document.getElementById('listen-btn'),
-  settingsBtn: document.getElementById('settings-btn'),
-  setup: document.getElementById('setup'),
-  apiKeyInput: document.getElementById('api-key'),
-  openaiKeyInput: document.getElementById('openai-key'),
-  saveKeyBtn: document.getElementById('save-key'),
-  closeSetupBtn: document.getElementById('close-setup'),
+  dot:            document.getElementById('dot'),
+  statusText:     document.getElementById('status-text'),
+  stage:          document.getElementById('stage'),
+  placeholder:    document.getElementById('placeholder'),
+  listenBtn:      document.getElementById('listen-btn'),
+  settingsBtn:    document.getElementById('settings-btn'),
+  setup:          document.getElementById('setup'),
+  apiKeyInput:    document.getElementById('api-key'),
+  saveKeyBtn:     document.getElementById('save-key'),
+  closeSetupBtn:  document.getElementById('close-setup'),
   errorContainer: document.getElementById('error-container'),
 };
 
-const ANTHROPIC_KEY_STORAGE = 'tagalog_captions_anthropic_key';
-const OPENAI_KEY_STORAGE = 'tagalog_captions_openai_key';
+const KEY_STORAGE = 'tagalog_captions_anthropic_key';
+let anthropicKey = localStorage.getItem(KEY_STORAGE) || '';
 
-let anthropicKey = localStorage.getItem(ANTHROPIC_KEY_STORAGE) || '';
-let openaiKey = localStorage.getItem(OPENAI_KEY_STORAGE) || '';
-
-let mediaStream = null;
-let mediaRecorder = null;
+let mediaStream    = null;
+let mediaRecorder  = null;
 let shouldBeListening = false;
-let chunkTimer = null;
+let chunkTimer     = null;
 let processingQueue = [];
-let isProcessing = false;
+let isProcessing   = false;
 
-const CHUNK_DURATION_MS = 4000; // record in ~4 second rolling windows
+const CHUNK_DURATION_MS  = 5000; // 5-second rolling windows
 const MAX_BLOCKS_VISIBLE = 4;
 
 // ---------- Setup screen ----------
 
 function openSetup() {
   els.apiKeyInput.value = anthropicKey;
-  els.openaiKeyInput.value = openaiKey;
   els.setup.style.display = 'flex';
 }
 
@@ -59,30 +49,25 @@ els.settingsBtn.addEventListener('click', openSetup);
 els.closeSetupBtn.addEventListener('click', closeSetup);
 
 els.saveKeyBtn.addEventListener('click', () => {
-  const aKey = els.apiKeyInput.value.trim();
-  const oKey = els.openaiKeyInput.value.trim();
-  if (!aKey || !oKey) {
-    showError('Both API keys are required to continue.');
+  const key = els.apiKeyInput.value.trim();
+  if (!key || !key.startsWith('sk-ant-')) {
+    showError('Enter a valid Anthropic API key (starts with sk-ant-).');
     return;
   }
-  anthropicKey = aKey;
-  openaiKey = oKey;
-  localStorage.setItem(ANTHROPIC_KEY_STORAGE, anthropicKey);
-  localStorage.setItem(OPENAI_KEY_STORAGE, openaiKey);
+  anthropicKey = key;
+  localStorage.setItem(KEY_STORAGE, anthropicKey);
   closeSetup();
 });
 
-if (!anthropicKey || !openaiKey) {
-  openSetup();
-}
+if (!anthropicKey) openSetup();
 
-// ---------- Error banner ----------
+// ---------- Utilities ----------
 
 let errorTimer = null;
 function showError(msg) {
   els.errorContainer.innerHTML = `<div class="error-banner">${msg}</div>`;
   clearTimeout(errorTimer);
-  errorTimer = setTimeout(() => { els.errorContainer.innerHTML = ''; }, 6000);
+  errorTimer = setTimeout(() => { els.errorContainer.innerHTML = ''; }, 7000);
 }
 
 function setStatus(dotClass, text) {
@@ -96,31 +81,30 @@ function stopUI() {
   setStatus('', 'Ready');
 }
 
-// ---------- Pick a supported audio mime type ----------
+// ---------- Audio format helpers ----------
 
 function pickMimeType() {
-  const candidates = [
-    'audio/mp4',
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/aac',
-  ];
-  for (const type of candidates) {
-    if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(type)) {
-      return type;
+  // Prefer mp4/aac on iOS, webm on Android/Chrome
+  const candidates = ['audio/mp4', 'audio/aac', 'audio/webm;codecs=opus', 'audio/webm'];
+  for (const t of candidates) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) {
+      return t;
     }
   }
-  return ''; // let the browser pick a default
+  return '';
 }
 
-// ---------- Start / stop listening ----------
+function mediaTypeForMime(mimeType) {
+  if (mimeType.includes('mp4'))  return 'audio/mp4';
+  if (mimeType.includes('aac'))  return 'audio/mp4'; // aac sent as mp4 container
+  if (mimeType.includes('webm')) return 'audio/webm';
+  return 'audio/mp4'; // safe default for Claude
+}
+
+// ---------- Listen button ----------
 
 els.listenBtn.addEventListener('click', async () => {
-  if (!anthropicKey || !openaiKey) {
-    openSetup();
-    return;
-  }
-
+  if (!anthropicKey) { openSetup(); return; }
   if (!shouldBeListening) {
     await startListening();
   } else {
@@ -129,113 +113,83 @@ els.listenBtn.addEventListener('click', async () => {
 });
 
 async function startListening() {
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showError('This browser does not support microphone access.');
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showError('Microphone not supported in this browser.');
     return;
   }
-
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch (err) {
-    showError('Microphone access was denied. Enable it in Settings → Safari → Microphone.');
+  } catch {
+    showError('Microphone access denied. Go to Settings → Safari → Microphone and allow access.');
     return;
   }
-
   shouldBeListening = true;
   els.listenBtn.textContent = 'Stop listening';
   els.listenBtn.classList.add('listening');
   setStatus('live', 'Listening');
-
   recordNextChunk();
 }
 
 function stopListening() {
   shouldBeListening = false;
   clearTimeout(chunkTimer);
-
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-  }
-  if (mediaStream) {
-    mediaStream.getTracks().forEach((t) => t.stop());
-    mediaStream = null;
-  }
-
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
   stopUI();
 }
+
+// ---------- Rolling chunk recorder ----------
 
 function recordNextChunk() {
   if (!shouldBeListening || !mediaStream) return;
 
   const mimeType = pickMimeType();
-  const options = mimeType ? { mimeType } : undefined;
-
   try {
-    mediaRecorder = new MediaRecorder(mediaStream, options);
-  } catch (err) {
-    showError('Could not start the audio recorder on this device.');
+    mediaRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
+  } catch {
+    showError('Could not start audio recorder on this device.');
     stopListening();
     return;
   }
 
   const localChunks = [];
-
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data && e.data.size > 0) localChunks.push(e.data);
-  };
+  mediaRecorder.ondataavailable = e => { if (e.data?.size > 0) localChunks.push(e.data); };
 
   mediaRecorder.onstop = () => {
     if (localChunks.length > 0) {
-      const blob = new Blob(localChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
-      // only queue chunks with meaningful size — skip near-silent empty chunks
-      if (blob.size > 2000) {
-        enqueueChunk(blob);
-      }
+      const blob = new Blob(localChunks, { type: mediaRecorder.mimeType || 'audio/mp4' });
+      if (blob.size > 2000) enqueueChunk(blob); // skip near-silent chunks
     }
-    // immediately start the next chunk if still listening
-    if (shouldBeListening) {
-      recordNextChunk();
-    }
+    if (shouldBeListening) recordNextChunk();
   };
 
   mediaRecorder.start();
-
-  // stop this chunk after CHUNK_DURATION_MS, which triggers onstop → next chunk starts
   chunkTimer = setTimeout(() => {
-    if (mediaRecorder && mediaRecorder.state === 'recording') {
-      mediaRecorder.stop();
-    }
+    if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
   }, CHUNK_DURATION_MS);
 }
 
-// ---------- Processing queue: transcribe then translate ----------
+// ---------- Queue ----------
 
 function enqueueChunk(blob) {
   processingQueue.push(blob);
-  // avoid unbounded backlog if network is slow — keep only the most recent few
-  if (processingQueue.length > 3) {
-    processingQueue.shift();
-  }
+  if (processingQueue.length > 3) processingQueue.shift(); // drop oldest if lagging
   processQueue();
 }
 
 async function processQueue() {
   if (isProcessing || processingQueue.length === 0) return;
   isProcessing = true;
-  setStatus('live', 'Transcribing');
+  setStatus('live', 'Translating');
 
   const blob = processingQueue.shift();
 
   try {
-    const tagalogText = await transcribe(blob);
-    if (tagalogText && tagalogText.trim() && !isLowContent(tagalogText)) {
-      setStatus('live', 'Translating');
-      const englishText = await translate(tagalogText.trim());
-      addCaptionBlock(tagalogText.trim(), englishText);
-    }
+    const result = await transcribeAndTranslate(blob);
+    if (result) addCaptionBlock(result.tagalog, result.english);
   } catch (err) {
     console.error(err);
-    showError(err.message || 'Something went wrong processing audio.');
+    showError(err.message || 'Translation failed — check your API key.');
   } finally {
     isProcessing = false;
     if (shouldBeListening) setStatus('live', 'Listening');
@@ -243,58 +197,13 @@ async function processQueue() {
   }
 }
 
-function extensionForMime(mimeType) {
-  if (mimeType.includes('mp4')) return 'mp4';
-  if (mimeType.includes('webm')) return 'webm';
-  if (mimeType.includes('aac')) return 'aac';
-  return 'webm';
-}
+// ---------- Single Claude call: audio in → English out ----------
 
-// Filters out near-empty or noise transcriptions so they never reach
-// the translation API. Whisper often returns short filler artifacts
-// for silence, background noise, or breathing — none of that is worth
-// a translation call.
-const FILLER_PATTERNS = [
-  /^[.\s…]*$/i,                 // just punctuation/whitespace
-  /^(uh+|um+|hm+|ah+|oh+)[.\s!?]*$/i, // single filler sound
-  /^(thank you\.?|thanks\.?)$/i,      // common Whisper hallucination on silence
-  /^you\.?$/i,                        // another common silence hallucination
-];
+async function transcribeAndTranslate(blob) {
+  // Convert blob to base64
+  const base64 = await blobToBase64(blob);
+  const mediaType = mediaTypeForMime(blob.type);
 
-function isLowContent(text) {
-  const trimmed = text.trim();
-  if (trimmed.length < 3) return true;
-  const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
-  if (wordCount === 1 && trimmed.length < 6) return true;
-  return FILLER_PATTERNS.some((pattern) => pattern.test(trimmed));
-}
-
-async function transcribe(blob) {
-  const ext = extensionForMime(blob.type);
-  const formData = new FormData();
-  formData.append('file', blob, `chunk.${ext}`);
-  formData.append('model', 'whisper-1');
-  formData.append('language', 'tl'); // ISO code for Tagalog
-  formData.append('response_format', 'text');
-
-  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${openaiKey}`,
-    },
-    body: formData,
-  });
-
-  if (!response.ok) {
-    const errBody = await response.text();
-    if (response.status === 401) throw new Error('OpenAI API key is invalid.');
-    throw new Error('Transcription error ' + response.status + ': ' + errBody.slice(0, 120));
-  }
-
-  return await response.text();
-}
-
-async function translate(tagalogText) {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -304,67 +213,118 @@ async function translate(tagalogText) {
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',
       max_tokens: 300,
-      system: "Translate Tagalog/Taglish to casual English. Output only the translation, nothing else.",
-      messages: [
-        { role: 'user', content: tagalogText }
-      ],
+      system: `You are a Tagalog-to-English live caption assistant.
+Listen to the audio. If it contains Tagalog or Taglish speech, respond with JSON only, like this:
+{"tagalog":"<what was said>","english":"<natural English translation>"}
+If the audio is silent, noise only, or has no meaningful speech, respond with exactly: SKIP
+No other output. No markdown. No explanation.`,
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'document',
+          source: {
+            type: 'base64',
+            media_type: mediaType,
+            data: base64,
+          },
+        }, {
+          type: 'text',
+          text: 'Transcribe and translate the Tagalog speech in this audio clip.',
+        }],
+      }],
     }),
   });
 
   if (!response.ok) {
-    const errBody = await response.text();
-    if (response.status === 401) throw new Error('Anthropic API key is invalid.');
-    throw new Error('Translation error ' + response.status + ': ' + errBody.slice(0, 120));
+    const body = await response.text();
+    if (response.status === 401) throw new Error('Invalid Anthropic API key — tap ⚙ to update it.');
+    if (response.status === 429) throw new Error('Rate limit hit — slow down or check your Anthropic plan.');
+    throw new Error('API error ' + response.status + ': ' + body.slice(0, 120));
   }
 
   const data = await response.json();
-  const textBlock = data.content.find((b) => b.type === 'text');
-  return textBlock ? textBlock.text.trim() : '';
+  const textBlock = data.content.find(b => b.type === 'text');
+  if (!textBlock) return null;
+
+  const raw = textBlock.text.trim();
+  if (raw === 'SKIP' || raw === '') return null;
+
+  try {
+    // Strip any accidental markdown fences before parsing
+    const clean = raw.replace(/^```json|```$/gm, '').trim();
+    const parsed = JSON.parse(clean);
+    if (!parsed.english || isLowContent(parsed.english)) return null;
+    return parsed;
+  } catch {
+    // If Claude returned plain English without JSON, show it anyway
+    if (raw.length > 3 && !isLowContent(raw)) {
+      return { tagalog: '', english: raw };
+    }
+    return null;
+  }
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      // result is "data:audio/mp4;base64,XXXX" — strip the prefix
+      const base64 = reader.result.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// ---------- Filler filter ----------
+
+const FILLER_PATTERNS = [
+  /^[.\s…,!?]*$/,
+  /^(uh+|um+|hm+|ah+|oh+)[.\s!?]*$/i,
+  /^(thank you\.?|thanks\.?|you\.?)$/i,
+];
+
+function isLowContent(text) {
+  const t = text.trim();
+  if (t.length < 3) return true;
+  if (t.split(/\s+/).filter(Boolean).length === 1 && t.length < 6) return true;
+  return FILLER_PATTERNS.some(p => p.test(t));
 }
 
 // ---------- Caption rendering ----------
 
-function addCaptionBlock(sourceText, englishText) {
+function addCaptionBlock(tagalogText, englishText) {
   if (!englishText) return;
 
-  if (els.placeholder) {
-    els.placeholder.remove();
-    els.placeholder = null;
-  }
+  if (els.placeholder) { els.placeholder.remove(); els.placeholder = null; }
 
-  const prevCurrent = els.stage.querySelector('.caption-block.current');
-  if (prevCurrent) {
-    prevCurrent.classList.remove('current');
-    prevCurrent.classList.add('fading');
-  }
+  const prev = els.stage.querySelector('.caption-block.current');
+  if (prev) { prev.classList.remove('current'); prev.classList.add('fading'); }
 
   const block = document.createElement('div');
   block.className = 'caption-block current';
   block.innerHTML = `
-    <div class="source-line">${escapeHtml(sourceText)}</div>
+    ${tagalogText ? `<div class="source-line">${escapeHtml(tagalogText)}</div>` : ''}
     <div class="english-line">${escapeHtml(englishText)}</div>
   `;
   els.stage.appendChild(block);
   block.scrollIntoView({ block: 'end' });
 
   const blocks = els.stage.querySelectorAll('.caption-block');
-  if (blocks.length > MAX_BLOCKS_VISIBLE) {
-    blocks[0].remove();
-  }
+  if (blocks.length > MAX_BLOCKS_VISIBLE) blocks[0].remove();
 }
 
 function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
 }
 
-// ---------- Register service worker (PWA installability) ----------
+// ---------- PWA service worker ----------
 
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  });
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
