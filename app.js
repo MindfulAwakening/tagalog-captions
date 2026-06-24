@@ -1,10 +1,5 @@
 // ============================================================
 // Tagalog → English live captions — Anthropic-only version
-//
-// Records 5-second audio chunks via MediaRecorder (works on iOS),
-// converts each chunk to base64, and sends it directly to Claude
-// which both transcribes the Tagalog AND returns the English
-// translation in a single API call. No OpenAI needed.
 // ============================================================
 
 const els = {
@@ -24,42 +19,45 @@ const els = {
 const KEY_STORAGE = 'tagalog_captions_anthropic_key';
 let anthropicKey = localStorage.getItem(KEY_STORAGE) || '';
 
-let mediaStream    = null;
-let mediaRecorder  = null;
+let mediaStream       = null;
+let mediaRecorder     = null;
 let shouldBeListening = false;
-let chunkTimer     = null;
-let processingQueue = [];
-let isProcessing   = false;
+let chunkTimer        = null;
+let processingQueue   = [];
+let isProcessing      = false;
 
-const CHUNK_DURATION_MS  = 5000; // 5-second rolling windows
+const CHUNK_DURATION_MS  = 5000;
 const MAX_BLOCKS_VISIBLE = 4;
 
 // ---------- Setup screen ----------
 
 function openSetup() {
   els.apiKeyInput.value = anthropicKey;
-  els.setup.style.cssText = 'display:flex !important; z-index:999; position:fixed; inset:0;';
+  els.setup.style.display = 'flex';
 }
 
 function closeSetup() {
-  els.setup.style.cssText = 'display:none !important;';
+  els.setup.style.display = 'none';
 }
 
-els.settingsBtn.addEventListener('click', openSetup);
-els.closeSetupBtn.addEventListener('click', closeSetup);
-
-els.saveKeyBtn.addEventListener('click', () => {
+function saveKey() {
   const key = els.apiKeyInput.value.trim();
   if (!key) {
-    showError('Paste your Anthropic API key to continue.');
+    alert('Please paste your Anthropic API key first.');
     return;
   }
   anthropicKey = key;
   localStorage.setItem(KEY_STORAGE, anthropicKey);
   closeSetup();
-  showError('✓ API key saved. Tap Start listening to begin.');
-});
+  alert('Key saved! Now click Start listening.');
+}
 
+// Use onclick only — no addEventListener conflicts
+els.settingsBtn.onclick  = openSetup;
+els.closeSetupBtn.onclick = closeSetup;
+els.saveKeyBtn.onclick   = saveKey;
+
+// Show setup automatically on first run
 if (!anthropicKey) openSetup();
 
 // ---------- Utilities ----------
@@ -85,7 +83,6 @@ function stopUI() {
 // ---------- Audio format helpers ----------
 
 function pickMimeType() {
-  // Prefer mp4/aac on iOS, webm on Android/Chrome
   const candidates = ['audio/mp4', 'audio/aac', 'audio/webm;codecs=opus', 'audio/webm'];
   for (const t of candidates) {
     if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) {
@@ -97,31 +94,31 @@ function pickMimeType() {
 
 function mediaTypeForMime(mimeType) {
   if (mimeType.includes('mp4'))  return 'audio/mp4';
-  if (mimeType.includes('aac'))  return 'audio/mp4'; // aac sent as mp4 container
+  if (mimeType.includes('aac'))  return 'audio/mp4';
   if (mimeType.includes('webm')) return 'audio/webm';
-  return 'audio/mp4'; // safe default for Claude
+  return 'audio/mp4';
 }
 
 // ---------- Listen button ----------
 
-els.listenBtn.addEventListener('click', async () => {
+els.listenBtn.onclick = async () => {
   if (!anthropicKey) { openSetup(); return; }
   if (!shouldBeListening) {
     await startListening();
   } else {
     stopListening();
   }
-});
+};
 
 async function startListening() {
-  if (!navigator.mediaDevices?.getUserMedia) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     showError('Microphone not supported in this browser.');
     return;
   }
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  } catch {
-    showError('Microphone access denied. Go to Settings → Safari → Microphone and allow access.');
+  } catch (e) {
+    showError('Microphone access denied. Allow it in browser settings.');
     return;
   }
   shouldBeListening = true;
@@ -147,26 +144,26 @@ function recordNextChunk() {
   const mimeType = pickMimeType();
   try {
     mediaRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
-  } catch {
-    showError('Could not start audio recorder on this device.');
+  } catch (e) {
+    showError('Could not start audio recorder.');
     stopListening();
     return;
   }
 
   const localChunks = [];
-  mediaRecorder.ondataavailable = e => { if (e.data?.size > 0) localChunks.push(e.data); };
+  mediaRecorder.ondataavailable = e => { if (e.data && e.data.size > 0) localChunks.push(e.data); };
 
   mediaRecorder.onstop = () => {
     if (localChunks.length > 0) {
       const blob = new Blob(localChunks, { type: mediaRecorder.mimeType || 'audio/mp4' });
-      if (blob.size > 2000) enqueueChunk(blob); // skip near-silent chunks
+      if (blob.size > 2000) enqueueChunk(blob);
     }
     if (shouldBeListening) recordNextChunk();
   };
 
   mediaRecorder.start();
   chunkTimer = setTimeout(() => {
-    if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
+    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
   }, CHUNK_DURATION_MS);
 }
 
@@ -174,7 +171,7 @@ function recordNextChunk() {
 
 function enqueueChunk(blob) {
   processingQueue.push(blob);
-  if (processingQueue.length > 3) processingQueue.shift(); // drop oldest if lagging
+  if (processingQueue.length > 3) processingQueue.shift();
   processQueue();
 }
 
@@ -190,7 +187,7 @@ async function processQueue() {
     if (result) addCaptionBlock(result.tagalog, result.english);
   } catch (err) {
     console.error(err);
-    showError(err.message || 'Translation failed — check your API key.');
+    showError(err.message || 'Translation failed.');
   } finally {
     isProcessing = false;
     if (shouldBeListening) setStatus('live', 'Listening');
@@ -198,10 +195,9 @@ async function processQueue() {
   }
 }
 
-// ---------- Single Claude call: audio in → English out ----------
+// ---------- Claude: audio in → English out ----------
 
 async function transcribeAndTranslate(blob) {
-  // Convert blob to base64
   const base64 = await blobToBase64(blob);
   const mediaType = mediaTypeForMime(blob.type);
 
@@ -217,7 +213,7 @@ async function transcribeAndTranslate(blob) {
       model: 'claude-sonnet-4-6',
       max_tokens: 300,
       system: `You are a Tagalog-to-English live caption assistant.
-Listen to the audio. If it contains Tagalog or Taglish speech, respond with JSON only, like this:
+Listen to the audio. If it contains Tagalog or Taglish speech, respond with JSON only:
 {"tagalog":"<what was said>","english":"<natural English translation>"}
 If the audio is silent, noise only, or has no meaningful speech, respond with exactly: SKIP
 No other output. No markdown. No explanation.`,
@@ -225,11 +221,7 @@ No other output. No markdown. No explanation.`,
         role: 'user',
         content: [{
           type: 'document',
-          source: {
-            type: 'base64',
-            media_type: mediaType,
-            data: base64,
-          },
+          source: { type: 'base64', media_type: mediaType, data: base64 },
         }, {
           type: 'text',
           text: 'Transcribe and translate the Tagalog speech in this audio clip.',
@@ -240,8 +232,8 @@ No other output. No markdown. No explanation.`,
 
   if (!response.ok) {
     const body = await response.text();
-    if (response.status === 401) throw new Error('Invalid Anthropic API key — tap ⚙ to update it.');
-    if (response.status === 429) throw new Error('Rate limit hit — slow down or check your Anthropic plan.');
+    if (response.status === 401) throw new Error('Invalid API key — tap ⚙ to update it.');
+    if (response.status === 429) throw new Error('Rate limit hit — wait a moment and try again.');
     throw new Error('API error ' + response.status + ': ' + body.slice(0, 120));
   }
 
@@ -253,16 +245,12 @@ No other output. No markdown. No explanation.`,
   if (raw === 'SKIP' || raw === '') return null;
 
   try {
-    // Strip any accidental markdown fences before parsing
     const clean = raw.replace(/^```json|```$/gm, '').trim();
     const parsed = JSON.parse(clean);
     if (!parsed.english || isLowContent(parsed.english)) return null;
     return parsed;
-  } catch {
-    // If Claude returned plain English without JSON, show it anyway
-    if (raw.length > 3 && !isLowContent(raw)) {
-      return { tagalog: '', english: raw };
-    }
+  } catch (e) {
+    if (raw.length > 3 && !isLowContent(raw)) return { tagalog: '', english: raw };
     return null;
   }
 }
@@ -270,11 +258,7 @@ No other output. No markdown. No explanation.`,
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onloadend = () => {
-      // result is "data:audio/mp4;base64,XXXX" — strip the prefix
-      const base64 = reader.result.split(',')[1];
-      resolve(base64);
-    };
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
     reader.onerror = reject;
     reader.readAsDataURL(blob);
   });
@@ -283,7 +267,7 @@ function blobToBase64(blob) {
 // ---------- Filler filter ----------
 
 const FILLER_PATTERNS = [
-  /^[.\s…,!?]*$/,
+  /^[.\s,!?]*$/,
   /^(uh+|um+|hm+|ah+|oh+)[.\s!?]*$/i,
   /^(thank you\.?|thanks\.?|you\.?)$/i,
 ];
@@ -299,7 +283,6 @@ function isLowContent(text) {
 
 function addCaptionBlock(tagalogText, englishText) {
   if (!englishText) return;
-
   if (els.placeholder) { els.placeholder.remove(); els.placeholder = null; }
 
   const prev = els.stage.querySelector('.caption-block.current');
