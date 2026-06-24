@@ -50,8 +50,8 @@ els.closeSetupBtn.addEventListener('click', closeSetup);
 
 els.saveKeyBtn.addEventListener('click', () => {
   const key = els.apiKeyInput.value.trim();
-  if (!key || !key.startsWith('sk-ant-')) {
-    showError('Enter a valid Anthropic API key (starts with sk-ant-).');
+  if (!key) {
+    showError('Paste your Anthropic API key to continue.');
     return;
   }
   anthropicKey = key;
