@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0B0E10">
+<title>Tagalog Captions</title>
+<link rel="manifest" href="manifest.json">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0B0E10;
+    --bg-raised: #14181B;
+    --text-main: #F2EEE6;
+    --text-dim: #8A8F93;
+    --accent-gold: #C9A85C;
+    --accent-coral: #E0654A;
+    --border: #21262A;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text-main);
+    font-family: 'JetBrains Mono', monospace;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  #app {
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+
+  /* ---- Top status bar ---- */
+  .statusbar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .brand {
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.3s;
+  }
+
+  .dot.live {
+    background: var(--accent-coral);
+    box-shadow: 0 0 0 0 rgba(224, 101, 74, 0.6);
+    animation: pulse 1.8s infinite;
+  }
+
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(224, 101, 74, 0.5); }
+    70% { box-shadow: 0 0 0 8px rgba(224, 101, 74, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(224, 101, 74, 0); }
+  }
+
+  /* ---- Main caption stage ---- */
+  .stage {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 24px 24px 8px;
+    gap: 18px;
+    overflow: hidden;
+  }
+
+  .caption-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    animation: rise 0.45s ease-out;
+  }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .caption-block.fading {
+    opacity: 0.32;
+    transform: scale(0.97);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+
+  .source-line {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--accent-gold);
+    letter-spacing: 0.01em;
+    line-height: 1.5;
+  }
+
+  .english-line {
+    font-family: 'Source Serif 4', serif;
+    font-weight: 400;
+    font-size: clamp(22px, 6vw, 34px);
+    line-height: 1.32;
+    color: var(--text-main);
+  }
+
+  .caption-block.current .english-line {
+    font-weight: 600;
+  }
+
+  .placeholder {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 10px;
+    color: var(--text-dim);
+    padding: 0 30px;
+  }
+
+  .placeholder .big {
+    font-family: 'Source Serif 4', serif;
+    font-size: 22px;
+    color: var(--text-main);
+  }
+
+  .placeholder .small {
+    font-size: 13px;
+    line-height: 1.6;
+    max-width: 280px;
+  }
+
+  /* ---- Bottom control bar ---- */
+  .controls {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px 20px calc(20px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    gap: 14px;
+  }
+
+  .listen-btn {
+    flex: 1;
+    max-width: 320px;
+    background: var(--text-main);
+    color: var(--bg);
+    border: none;
+    border-radius: 999px;
+    padding: 16px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: transform 0.15s ease, background 0.2s ease;
+  }
+
+  .listen-btn:active { transform: scale(0.97); }
+
+  .listen-btn.listening {
+    background: var(--accent-coral);
+    color: var(--text-main);
+  }
+
+  .icon-btn {
+    width: 50px;
+    height: 50px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 18px;
+  }
+
+  /* ---- Setup screen ---- */
+  .setup {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    padding: 32px 28px;
+    padding-top: calc(32px + env(safe-area-inset-top));
+    overflow-y: auto;
+  }
+
+  .setup h1 {
+    font-family: 'Source Serif 4', serif;
+    font-size: 30px;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+
+  .setup .sub {
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 28px;
+  }
+
+  .setup label {
+    display: block;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+
+  .setup input {
+    width: 100%;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    margin-bottom: 24px;
+  }
+
+  .setup input:focus {
+    outline: none;
+    border-color: var(--accent-gold);
+  }
+
+  .setup .save-btn {
+    background: var(--accent-gold);
+    color: var(--bg);
+    border: none;
+    border-radius: 999px;
+    padding: 16px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .setup .note {
+    margin-top: 20px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  .setup .note a { color: var(--accent-gold); }
+
+  .setup .close-row {
+    margin-top: auto;
+    padding-top: 20px;
+    text-align: center;
+  }
+
+  .setup .close-row button {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    cursor: pointer;
+    padding: 10px;
+  }
+
+  .error-banner {
+    background: rgba(224, 101, 74, 0.12);
+    border: 1px solid var(--accent-coral);
+    color: var(--accent-coral);
+    font-size: 12px;
+    line-height: 1.5;
+    padding: 12px 14px;
+    border-radius: 10px;
+    margin: 0 24px 14px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .caption-block, .caption-block.fading, .dot.live { animation: none; transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="statusbar">
+    <div class="brand">Tagalog → English</div>
+    <div class="indicator">
+      <div class="dot" id="dot"></div>
+      <span id="status-text">Ready</span>
+    </div>
+  </div>
+
+  <div id="error-container"></div>
+
+  <div class="stage" id="stage">
+    <div class="placeholder" id="placeholder">
+      <div class="big">Listening for Tagalog</div>
+      <div class="small">Press start and hold the phone toward the conversation. Captions update every few seconds as audio is transcribed and translated.</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="listen-btn" id="listen-btn">Start listening</button>
+    <button class="icon-btn" id="settings-btn" aria-label="Settings">⚙</button>
+  </div>
+</div>
+
+<div class="setup" id="setup" style="display:none;">
+  <h1>Set up</h1>
+  <div class="sub">This app translates speech on your phone, no audio is recorded or uploaded. The recognized Tagalog text is sent to Claude for translation only.</div>
+
+  <label for="openai-key">OpenAI API key — for Tagalog transcription</label>
+  <input type="password" id="openai-key" placeholder="sk-...">
+
+  <label for="api-key">Anthropic API key — for English translation</label>
+  <input type="password" id="api-key" placeholder="sk-ant-...">
+
+  <button class="save-btn" id="save-key">Save and continue</button>
+
+  <div class="note">
+    Get an OpenAI key at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a> and an Anthropic key at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>. Both are stored only on this device, in your browser's local storage, and sent only directly to their respective APIs.
+  </div>
+
+  <div class="close-row">
+    <button id="close-setup">Close</button>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
