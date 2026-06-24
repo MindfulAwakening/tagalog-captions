@@ -220,7 +220,7 @@ No other output. No markdown. No explanation.`,
       messages: [{
         role: 'user',
         content: [{
-          type: 'document',
+          type: 'audio',
           source: { type: 'base64', media_type: mediaType, data: base64 },
         }, {
           type: 'text',
