@@ -38,11 +38,11 @@ const MAX_BLOCKS_VISIBLE = 4;
 
 function openSetup() {
   els.apiKeyInput.value = anthropicKey;
-  els.setup.style.display = 'flex';
+  els.setup.style.cssText = 'display:flex !important; z-index:999; position:fixed; inset:0;';
 }
 
 function closeSetup() {
-  els.setup.style.display = 'none';
+  els.setup.style.cssText = 'display:none !important;';
 }
 
 els.settingsBtn.addEventListener('click', openSetup);
@@ -57,6 +57,7 @@ els.saveKeyBtn.addEventListener('click', () => {
   anthropicKey = key;
   localStorage.setItem(KEY_STORAGE, anthropicKey);
   closeSetup();
+  showError('✓ API key saved. Tap Start listening to begin.');
 });
 
 if (!anthropicKey) openSetup();
